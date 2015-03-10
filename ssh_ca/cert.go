@@ -5,6 +5,7 @@ import (
     "fmt"
 	"golang.org/x/crypto/ssh"
     "strings"
+    "time"
 )
 
 type SshCertificate struct {
@@ -15,6 +16,16 @@ func (c *SshCertificate) BytesForSigning() []byte {
 	c.Signature = nil
 	cert_bytes := c.Marshal()
 	return cert_bytes[:len(cert_bytes)-4]
+}
+
+func (c *SshCertificate) GoString() string {
+    var output string
+
+    output += fmt.Sprintf("Cert serial: %v\n", c.Serial)
+    output += fmt.Sprintf("Cert valid for public key: %s\n", MakeFingerprint(c.Key.Marshal()))
+    output += fmt.Sprintf("Valid between %v and %v\n",
+        time.Unix(int64(c.ValidAfter), 0), time.Unix(int64(c.ValidBefore), 0))
+    return output
 }
 
 func MakeFingerprint(key_blob []byte) string{
