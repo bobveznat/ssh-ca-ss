@@ -8,9 +8,11 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 	"log"
 	"net"
+    "net/http"
+    "net/url"
 	"os"
-    "time"
     "strings"
+    "time"
     "./ssh_ca"
 )
 
@@ -28,7 +30,7 @@ func main() {
     valid_before_dur, _ = time.ParseDuration("2h")
     valid_after_dur, _ = time.ParseDuration("0")
 
-    flag.StringVar(&principals_str, "principals", "", "Valid usernames for login. Comma separated.")
+    flag.StringVar(&principals_str, "principals", "ec2-user,ubuntu", "Valid usernames for login. Comma separated.")
     flag.StringVar(&environment, "environment", "", "The environment you want (e.g. prod).")
     flag.StringVar(&config_path, "config_path", config_path, "Path to config json.")
     flag.DurationVar(&valid_after_dur, "valid-after", valid_after_dur, "Relative time")
@@ -137,4 +139,21 @@ func main() {
     cert_request := new_cert.Marshal()
     log.Println("Cert request is:", base64.StdEncoding.EncodeToString(cert_request))
     log.Printf("And that is:\n%s\n", new_cert.GoString())
+
+    request_parameters := make(url.Values)
+    request_parameters["cert"] = make([]string, 1)
+    request_parameters["cert"][0] = base64.StdEncoding.EncodeToString(cert_request)
+    request_parameters["environment"] = make([]string, 1)
+    request_parameters["environment"][0] = environment
+    resp, err := http.PostForm(config[environment].SignerUrl + "cert/requests", request_parameters)
+    if err != nil {
+        log.Println("Error sending request to signer daemon:", err)
+        os.Exit(1)
+    }
+    defer resp.Body.Close()
+    log.Println("sent request", resp.Status)
+    resp_buf := make([]byte, 1024)
+    resp.Body.Read(resp_buf)
+    log.Println(string(resp_buf))
+
 }

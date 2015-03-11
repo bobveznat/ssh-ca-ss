@@ -7,11 +7,17 @@ import (
 
 type RequesterConfig struct {
     PublicKeyPath string
+    SignerUrl string
 }
 
-func LoadRequesterConfig(config_path string) (map[string]RequesterConfig, error) {
-    environment_configs := make(map[string]RequesterConfig)
+type SignerConfig struct {
+    SigningKeyFingerprint string
+    AuthorizedSigners []string
+    AuthorizedUsers []string
+    NumberSignersRequired int
+}
 
+func read_config_file(config_path string) ([]byte, error) {
     file, err := os.Open(config_path)
     if err != nil {
         return nil, err
@@ -23,7 +29,34 @@ func LoadRequesterConfig(config_path string) (map[string]RequesterConfig, error)
         return nil, err
     }
 
-    err = json.Unmarshal(buf[0:count], &environment_configs)
+    return buf[0:count], nil
+}
+
+func LoadRequesterConfig(config_path string) (map[string]RequesterConfig, error) {
+    environment_configs := make(map[string]RequesterConfig)
+
+    raw_config, err := read_config_file(config_path)
+    if err != nil {
+        return nil, err
+    }
+
+    err = json.Unmarshal(raw_config, &environment_configs)
+    if err != nil {
+        return nil, err
+    }
+
+    return environment_configs, nil
+}
+
+func LoadSignerConfig(config_path string) (map[string]SignerConfig, error) {
+    environment_configs := make(map[string]SignerConfig)
+
+    raw_config, err := read_config_file(config_path)
+    if err != nil {
+        return nil, err
+    }
+
+    err = json.Unmarshal(raw_config, &environment_configs)
     if err != nil {
         return nil, err
     }
