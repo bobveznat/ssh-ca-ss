@@ -137,7 +137,6 @@ func main() {
 	}
 
 	cert_request := new_cert.Marshal()
-	log.Println("Cert request is:", base64.StdEncoding.EncodeToString(cert_request))
 	log.Printf("And that is:\n%s\n", new_cert.GoString())
 
 	request_parameters := make(url.Values)

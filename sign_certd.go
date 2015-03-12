@@ -4,6 +4,8 @@ import (
 	"./ssh_ca"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/gorilla/mux"
@@ -17,38 +19,51 @@ import (
 type CertRequest struct {
 	request     *ssh.Certificate
 	submit_time time.Time
+	environment string
 }
 
-var state = make(map[string]CertRequest)
+func new_cert_request() CertRequest {
+	var cr CertRequest
+	cr.submit_time = time.Now()
+	return cr
+}
 
 type CertRequestHandler struct {
 	Config map[string]ssh_ca.SignerConfig
+	state  map[string]CertRequest
 }
 
 type CertRequestForm struct {
 	cert string
 }
 
-func (h *CertRequestHandler) create_signing_request(rw http.ResponseWriter, req *http.Request) {
-	log.Println("create_signing_request", req)
+func (h *CertRequestHandler) form_boilerplate(req *http.Request) (*ssh_ca.SignerConfig, string, error) {
 	err := req.ParseForm()
 	if err != nil {
-		log.Println("Error parsing request form:", err)
+		err := errors.New(fmt.Sprintf("%v", err))
+		return nil, "", err
+	}
+	if req.Form["environment"] == nil {
+		err := errors.New("Must specify environment")
+		return nil, "", err
+	}
+	environment := req.Form["environment"][0]
+	config, ok := h.Config[environment]
+	if !ok {
+		err := errors.New("Environment is not configured (is it valid?)")
+		return nil, "", err
+	}
+	return &config, environment, nil
+}
+
+func (h *CertRequestHandler) create_signing_request(rw http.ResponseWriter, req *http.Request) {
+	log.Println("create_signing_request")
+
+	config, environment, err := h.form_boilerplate(req)
+	if err != nil {
 		http.Error(rw, fmt.Sprintf("%v", err), http.StatusBadRequest)
 		return
 	}
-
-	if req.PostForm["environment"] == nil {
-		http.Error(rw, "Must specify environment", http.StatusBadRequest)
-		return
-	}
-	environment := req.PostForm["environment"][0]
-	//if h.Config["environment"] == nil {
-	//http.Error(rw, "Environment is not configured (is it valid?)", http.StatusBadRequest)
-	//return
-	//}
-
-	config := h.Config[environment]
 
 	if req.PostForm["cert"] == nil || len(req.PostForm["cert"]) == 0 {
 		http.Error(rw, "Please specify exactly one cert request", http.StatusBadRequest)
@@ -69,7 +84,7 @@ func (h *CertRequestHandler) create_signing_request(rw http.ResponseWriter, req 
 	cert := pub_key.(*ssh.Certificate)
 	log.Println("Cert serial", cert.Serial)
 	log.Println("Cert principals", cert.ValidPrincipals)
-	log.Println("Signing key", cert.SignatureKey)
+	log.Println("Signed by key", ssh_ca.MakeFingerprint(cert.SignatureKey.Marshal()))
 	log.Println("Valid between", cert.ValidAfter, cert.ValidBefore)
 
 	var cert_checker ssh.CertChecker
@@ -91,16 +106,35 @@ func (h *CertRequestHandler) create_signing_request(rw http.ResponseWriter, req 
 	rand.Reader.Read(request_id)
 	request_id_str := base64.StdEncoding.EncodeToString(request_id)
 
-	var cert_request CertRequest
+	cert_request := new_cert_request()
 	cert_request.request = cert
-	state[request_id_str] = cert_request
+	cert_request.environment = environment
+	h.state[request_id_str] = cert_request
 
 	rw.WriteHeader(http.StatusCreated)
 	rw.Write([]byte(request_id_str))
 	return
 }
 func (h *CertRequestHandler) list_pending_requests(rw http.ResponseWriter, req *http.Request) {
-	log.Println("list_pending_requests", req)
+	log.Println("list_pending_requests")
+	_, environment, err := h.form_boilerplate(req)
+	if err != nil {
+		http.Error(rw, fmt.Sprintf("%v", err), http.StatusBadRequest)
+		return
+	}
+
+	results := make(map[string]string)
+	for k, v := range h.state {
+		if v.environment == environment {
+			results[k] = base64.StdEncoding.EncodeToString(v.request.Marshal())
+		}
+	}
+	output, err := json.Marshal(results)
+	if err != nil {
+		http.Error(rw, fmt.Sprintf("Trouble marshaling json response %v", err), http.StatusInternalServerError)
+		return
+	}
+	rw.Write(output)
 }
 func (h *CertRequestHandler) get_request_status(rw http.ResponseWriter, req *http.Request) {
 	log.Println("get_request_status", req)
@@ -126,6 +160,7 @@ func main() {
 
 	var request_handler CertRequestHandler
 	request_handler.Config = config
+	request_handler.state = make(map[string]CertRequest)
 
 	r := mux.NewRouter()
 	requests := r.Path("/cert/requests").Subrouter()
