@@ -280,6 +280,7 @@ func main() {
 		os.Exit(1)
 	}
 	log.Println("Server started with config", config)
+	log.Println("Using SSH agent at", os.Getenv("SSH_AUTH_SOCK"))
 
 	conn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
 	if err != nil {
