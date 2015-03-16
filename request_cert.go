@@ -85,7 +85,7 @@ func main() {
 		log.Println("Trouble opening your public key file", pub_key_file, err)
 		os.Exit(1)
 	}
-	pub_key, _, _, _, err := ssh.ParseAuthorizedKey(buf)
+	pub_key, pub_key_comment, _, _, err := ssh.ParseAuthorizedKey(buf)
 	if err != nil {
 		log.Println("Trouble parsing your public key", err)
 		os.Exit(1)
@@ -125,7 +125,7 @@ func main() {
 	new_cert.Key = signer.PublicKey()
 	new_cert.Serial = 0
 	new_cert.CertType = ssh.UserCert
-	new_cert.KeyId = "deadbeef"
+	new_cert.KeyId = pub_key_comment
 	new_cert.ValidPrincipals = principals
 	new_cert.ValidAfter = valid_after
 	new_cert.ValidBefore = valid_before
@@ -144,7 +144,9 @@ func main() {
 	request_parameters["cert"][0] = base64.StdEncoding.EncodeToString(cert_request)
 	request_parameters["environment"] = make([]string, 1)
 	request_parameters["environment"][0] = environment
+	log.Println("POsting")
 	resp, err := http.PostForm(config[environment].SignerUrl+"cert/requests", request_parameters)
+	log.Println("POsted")
 	if err != nil {
 		log.Println("Error sending request to signer daemon:", err)
 		os.Exit(1)

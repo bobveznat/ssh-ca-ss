@@ -10,11 +10,16 @@ type RequesterConfig struct {
     SignerUrl string
 }
 
-type SignerConfig struct {
+type SignerdConfig struct {
     SigningKeyFingerprint string
     AuthorizedSigners []string
     AuthorizedUsers []string
     NumberSignersRequired int
+}
+
+type SignerConfig struct {
+    KeyFingerprint string
+    SignerUrl string
 }
 
 func read_config_file(config_path string) ([]byte, error) {
@@ -46,6 +51,23 @@ func LoadRequesterConfig(config_path string) (map[string]RequesterConfig, error)
     }
 
     return environment_configs, nil
+}
+
+func LoadSignerdConfig(config_path string) (map[string]SignerdConfig, error) {
+    environment_configs := make(map[string]SignerdConfig)
+
+    raw_config, err := read_config_file(config_path)
+    if err != nil {
+        return nil, err
+    }
+
+    err = json.Unmarshal(raw_config, &environment_configs)
+    if err != nil {
+        return nil, err
+    }
+
+    return environment_configs, nil
+
 }
 
 func LoadSignerConfig(config_path string) (map[string]SignerConfig, error) {
