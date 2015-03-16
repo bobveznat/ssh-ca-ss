@@ -5,9 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"flag"
+	"fmt"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -39,12 +39,12 @@ func main() {
 
 	config, err := ssh_ca.LoadRequesterConfig(config_path)
 	if err != nil {
-		log.Println("Load Config failed:", err)
+		fmt.Println("Load Config failed:", err)
 		os.Exit(1)
 	}
 
 	if len(config) > 1 && environment == "" {
-		log.Println("You must tell me which environment to use.", len(config))
+		fmt.Println("You must tell me which environment to use.", len(config))
 		os.Exit(1)
 	}
 	if len(config) == 1 && environment == "" {
@@ -58,43 +58,43 @@ func main() {
 	valid_before := uint64(time_now + int64(valid_before_dur.Seconds()))
 
 	if valid_after >= valid_before {
-		log.Printf("valid-after (%v) >= valid-before (%v). Which does not make sense.\n",
+		fmt.Printf("valid-after (%v) >= valid-before (%v). Which does not make sense.\n",
 			time.Unix(int64(valid_after), 0), time.Unix(int64(valid_before), 0))
 		command_line_has_errors = true
 	}
 
 	principals := strings.Split(strings.TrimSpace(principals_str), ",")
 	if principals_str == "" {
-		log.Println("You didn't specify any principals. This cert is worthless.")
+		fmt.Println("You didn't specify any principals. This cert is worthless.")
 		command_line_has_errors = true
 	}
 
 	if command_line_has_errors {
-		log.Println("One or more command line flags are busted.")
+		fmt.Println("One or more command line flags are busted.")
 		os.Exit(1)
 	}
 
 	pub_key_file, err := os.Open(config[environment].PublicKeyPath)
 	if err != nil {
-		log.Println("Trouble opening your public key file", pub_key_file, err)
+		fmt.Println("Trouble opening your public key file", pub_key_file, err)
 		os.Exit(1)
 	}
 	buf := make([]byte, 1<<13)
 	count, err := pub_key_file.Read(buf)
 	if err != nil || count == 0 {
-		log.Println("Trouble opening your public key file", pub_key_file, err)
+		fmt.Println("Trouble opening your public key file", pub_key_file, err)
 		os.Exit(1)
 	}
 	pub_key, pub_key_comment, _, _, err := ssh.ParseAuthorizedKey(buf)
 	if err != nil {
-		log.Println("Trouble parsing your public key", err)
+		fmt.Println("Trouble parsing your public key", err)
 		os.Exit(1)
 	}
 	chosen_key_fingerprint := ssh_ca.MakeFingerprint(pub_key.Marshal())
 
 	conn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
 	if err != nil {
-		log.Println("Dial failed:", err)
+		fmt.Println("Dial failed:", err)
 		os.Exit(1)
 	}
 	ssh_agent := agent.NewClient(conn)
@@ -103,8 +103,8 @@ func main() {
 	var signer ssh.Signer
 	signer = nil
 	if err != nil {
-		log.Println("No keys found in agent, can't sign request, bailing.")
-		log.Println("ssh-add the private half of the key you want to use.")
+		fmt.Println("No keys found in agent, can't sign request, bailing.")
+		fmt.Println("ssh-add the private half of the key you want to use.")
 		os.Exit(1)
 	} else {
 		for i := range signers {
@@ -116,7 +116,7 @@ func main() {
 		}
 	}
 	if signer == nil {
-		log.Println("ssh-add the private half of the key you want to use.")
+		fmt.Println("ssh-add the private half of the key you want to use.")
 		os.Exit(1)
 	}
 
@@ -132,29 +132,31 @@ func main() {
 
 	err = new_cert.SignCert(rand.Reader, signer)
 	if err != nil {
-		log.Println("Error signing:", err)
+		fmt.Println("Error signing:", err)
 		os.Exit(1)
 	}
 
 	cert_request := new_cert.Marshal()
-	log.Printf("And that is:\n%s\n", new_cert.GoString())
+	fmt.Printf("And that is:\n%s\n", new_cert.GoString())
 
 	request_parameters := make(url.Values)
 	request_parameters["cert"] = make([]string, 1)
 	request_parameters["cert"][0] = base64.StdEncoding.EncodeToString(cert_request)
 	request_parameters["environment"] = make([]string, 1)
 	request_parameters["environment"][0] = environment
-	log.Println("POsting")
 	resp, err := http.PostForm(config[environment].SignerUrl+"cert/requests", request_parameters)
-	log.Println("POsted")
 	if err != nil {
-		log.Println("Error sending request to signer daemon:", err)
+		fmt.Println("Error sending request to signer daemon:", err)
 		os.Exit(1)
 	}
 	defer resp.Body.Close()
-	log.Println("sent request", resp.Status)
 	resp_buf := make([]byte, 1024)
 	resp.Body.Read(resp_buf)
-	log.Println(string(resp_buf))
+	if resp.StatusCode == 201 {
+		fmt.Printf("Cert request id: %s\n", string(resp_buf))
+	} else {
+		fmt.Printf("Cert request rejected: %s\n", string(resp_buf))
+		os.Exit(1)
+	}
 
 }

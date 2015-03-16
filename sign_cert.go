@@ -2,17 +2,20 @@ package main
 
 import (
 	"./ssh_ca"
+	"bufio"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
+	"time"
 )
 
 type CertRequestResponse map[string]string
@@ -33,17 +36,17 @@ func main() {
 
 	all_config, err := ssh_ca.LoadSignerConfig(config_path)
 	if err != nil {
-		log.Println("Load Config failed:", err)
+		fmt.Println("Load Config failed:", err)
 		os.Exit(1)
 	}
 
 	if cert_request_id == "" {
-		log.Println("Specify --cert-request-id")
+		fmt.Println("Specify --cert-request-id")
 		os.Exit(1)
 	}
 
 	if len(all_config) > 1 && environment == "" {
-		log.Println("You must tell me which environment to use.", len(all_config))
+		fmt.Println("You must tell me which environment to use.", len(all_config))
 		os.Exit(1)
 	}
 	if len(all_config) == 1 && environment == "" {
@@ -55,7 +58,7 @@ func main() {
 
 	conn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
 	if err != nil {
-		log.Println("Dial failed:", err)
+		fmt.Println("Dial failed:", err)
 		os.Exit(1)
 	}
 	ssh_agent := agent.NewClient(conn)
@@ -64,8 +67,8 @@ func main() {
 	var signer ssh.Signer
 	signer = nil
 	if err != nil {
-		log.Println("No keys found in agent, can't sign request, bailing.")
-		log.Println("ssh-add the private half of the key you want to use.")
+		fmt.Println("No keys found in agent, can't sign request, bailing.")
+		fmt.Println("ssh-add the private half of the key you want to use.")
 		os.Exit(1)
 	} else {
 		for i := range signers {
@@ -77,7 +80,7 @@ func main() {
 		}
 	}
 	if signer == nil {
-		log.Println("ssh-add the private half of the key you want to use.")
+		fmt.Println("ssh-add the private half of the key you want to use.")
 		os.Exit(1)
 	}
 
@@ -91,30 +94,39 @@ func main() {
 	bytes_read, _ := get_resp.Body.Read(get_resp_buf)
 	get_resp.Body.Close()
 	if get_resp.StatusCode != 200 {
-		log.Println("Error getting that request id:", string(get_resp_buf))
+		fmt.Println("Error getting that request id:", string(get_resp_buf))
 		os.Exit(1)
 	}
 	get_response := make(CertRequestResponse)
 	err = json.Unmarshal(get_resp_buf[:bytes_read], &get_response)
 	if err != nil {
-		log.Println("Unable to unmarshall response", err)
+		fmt.Println("Unable to unmarshall response", err)
 		os.Exit(1)
 	}
-	log.Println("decoded into", get_response[cert_request_id])
 	parseable_cert := []byte("ssh-rsa-cert-v01@openssh.com " + get_response[cert_request_id])
 	pub_key, _, _, _, err := ssh.ParseAuthorizedKey(parseable_cert)
 	if err != nil {
-		log.Println("Trouble parsing response", err)
+		fmt.Println("Trouble parsing response", err)
 		os.Exit(1)
 	}
 	cert := pub_key.(*ssh.Certificate)
-	log.Println("Want to sign this one?")
-	log.Println(cert)
-	// XXX actually prompt
+	fmt.Println("Certificate data:")
+	fmt.Printf("  Serial: %v\n", cert.Serial)
+	fmt.Printf("  Key id: %v\n", cert.KeyId)
+	fmt.Printf("  Valid for public key: %s\n", ssh_ca.MakeFingerprint(cert.Key.Marshal()))
+	fmt.Printf("  Valid from %v - %v\n",
+		time.Unix(int64(cert.ValidAfter), 0), time.Unix(int64(cert.ValidBefore), 0))
+	fmt.Printf("Type 'yes' if you'd like to sign this cert request ")
+	reader := bufio.NewReader(os.Stdin)
+	text, _ := reader.ReadString('\n')
+	text = strings.TrimSpace(text)
+	if text != "yes" && text != "YES" {
+		os.Exit(0)
+	}
 
 	err = cert.SignCert(rand.Reader, signer)
 	if err != nil {
-		log.Println("Error signing:", err)
+		fmt.Println("Error signing:", err)
 		os.Exit(1)
 	}
 
@@ -127,13 +139,19 @@ func main() {
 	request_parameters["environment"][0] = environment
 	resp, err := http.PostForm(config.SignerUrl+"cert/requests/"+cert_request_id, request_parameters)
 	if err != nil {
-		log.Println("Error sending request to signer daemon:", err)
+		fmt.Println("Error sending request to signer daemon:", err)
 		os.Exit(1)
 	}
 	defer resp.Body.Close()
-	log.Println("sent request", resp.Status)
-	resp_buf := make([]byte, 1024)
-	resp.Body.Read(resp_buf)
-	log.Println(string(resp_buf))
+	if resp.StatusCode == 200 {
+		fmt.Println("Signature accepted by server.")
+	} else {
+		fmt.Println("Cert signature not accepted.")
+		fmt.Println("HTTP status", resp.Status)
+		resp_buf := make([]byte, 1024)
+		resp.Body.Read(resp_buf)
+		fmt.Println(string(resp_buf))
+		os.Exit(1)
+	}
 
 }
