@@ -27,6 +27,7 @@ type CertRequest struct {
 	environment string
 	signatures  map[string]bool
 	cert_signed bool
+	reason      string
 }
 
 func new_cert_request() CertRequest {
@@ -67,7 +68,6 @@ func (h *CertRequestHandler) form_boilerplate(req *http.Request) (*ssh_ca.Signer
 }
 
 func (h *CertRequestHandler) create_signing_request(rw http.ResponseWriter, req *http.Request) {
-	log.Println("create_signing_request")
 	var request_data SigningRequest
 	config, environment, err := h.form_boilerplate(req)
 	request_data.config = config
@@ -82,6 +82,11 @@ func (h *CertRequestHandler) create_signing_request(rw http.ResponseWriter, req 
 		return
 	}
 
+	if req.Form["reason"][0] == "" {
+		http.Error(rw, "You forgot to send in a reason", http.StatusBadRequest)
+		return
+	}
+
 	request_id := make([]byte, 15)
 	rand.Reader.Read(request_id)
 	request_id_str := base32.StdEncoding.EncodeToString(request_id)
@@ -89,10 +94,14 @@ func (h *CertRequestHandler) create_signing_request(rw http.ResponseWriter, req 
 	cert_request := new_cert_request()
 	cert_request.request = request_data.cert
 	cert_request.environment = request_data.environment
+	cert_request.reason = req.Form["reason"][0]
 	h.state[request_id_str] = cert_request
 
 	rw.WriteHeader(http.StatusCreated)
 	rw.Write([]byte(request_id_str))
+	log.Printf("Cert request %s from %s principals %v valid from %d to %d for '%s'\n",
+		request_id_str, request_data.cert.KeyId,
+		request_data.cert.ValidPrincipals, request_data.cert.ValidAfter, request_data.cert.ValidBefore, cert_request.reason)
 	return
 }
 
@@ -122,10 +131,6 @@ func (h *CertRequestHandler) extract_cert_from_request(req *http.Request, reques
 
 	cert := pub_key.(*ssh.Certificate)
 	request_data.cert = cert
-	log.Println("Cert serial", cert.Serial)
-	log.Println("Cert principals", cert.ValidPrincipals)
-	log.Println("Signed by key", ssh_ca.MakeFingerprint(cert.SignatureKey.Marshal()))
-	log.Println("Valid between", cert.ValidAfter, cert.ValidBefore)
 
 	var cert_checker ssh.CertChecker
 	cert_checker.IsAuthority = func(auth ssh.PublicKey) bool {
@@ -145,7 +150,6 @@ func (h *CertRequestHandler) extract_cert_from_request(req *http.Request, reques
 }
 
 func (h *CertRequestHandler) list_pending_requests(rw http.ResponseWriter, req *http.Request) {
-	log.Println("list_pending_requests")
 	_, environment, err := h.form_boilerplate(req)
 	if err != nil {
 		http.Error(rw, fmt.Sprintf("%v", err), http.StatusBadRequest)
@@ -154,7 +158,6 @@ func (h *CertRequestHandler) list_pending_requests(rw http.ResponseWriter, req *
 
 	var cert_request_id string
 	cert_request_ids, ok := req.Form["cert_request_id"]
-	log.Println("request form", req.Form)
 	if ok {
 		cert_request_id = cert_request_ids[0]
 	}
@@ -167,12 +170,10 @@ func (h *CertRequestHandler) list_pending_requests(rw http.ResponseWriter, req *
 			// Two ways to use this URL. If caller specified a cert_request_id
 			// then we return only that one. Otherwise everything.
 			if cert_request_id == "" {
-				log.Println("cert request id was empty, returning all", k)
 				results[k] = encoded_cert
 				found_something = true
 			} else {
 				if cert_request_id == k {
-					log.Println("cert request id not empty", cert_request_id, k)
 					results[k] = encoded_cert
 					found_something = true
 					break
@@ -194,11 +195,8 @@ func (h *CertRequestHandler) list_pending_requests(rw http.ResponseWriter, req *
 }
 
 func (h *CertRequestHandler) get_request_status(rw http.ResponseWriter, req *http.Request) {
-	log.Println("get_request_status", req)
-
 	uri_vars := mux.Vars(req)
 	request_id := uri_vars["request_id"]
-	log.Printf("%#v", h.state[request_id])
 
 	type Response struct {
 		cert_signed bool
@@ -215,7 +213,6 @@ func (h *CertRequestHandler) get_request_status(rw http.ResponseWriter, req *htt
 }
 
 func (h *CertRequestHandler) sign_request(rw http.ResponseWriter, req *http.Request) {
-	log.Println("sign_request")
 
 	uri_vars := mux.Vars(req)
 	request_id := uri_vars["request_id"]
@@ -230,14 +227,17 @@ func (h *CertRequestHandler) sign_request(rw http.ResponseWriter, req *http.Requ
 	}
 	err = h.extract_cert_from_request(req, &request_data, config.AuthorizedSigners)
 	if err != nil {
+		log.Println("Invalid certificate signing request received, ignoring")
 		http.Error(rw, fmt.Sprintf("%v", err), http.StatusBadRequest)
 		return
 	}
 
-	h.state[request_id].signatures[ssh_ca.MakeFingerprint(request_data.cert.SignatureKey.Marshal())] = true
+	signer_fp := ssh_ca.MakeFingerprint(request_data.cert.SignatureKey.Marshal())
+	h.state[request_id].signatures[signer_fp] = true
+	log.Printf("Signature for %s received from %s and determined valid\n", request_id, signer_fp)
 
 	if len(h.state[request_id].signatures) >= config.NumberSignersRequired {
-
+		log.Printf("Received %d signatures for %s, signing now.\n", len(h.state[request_id].signatures), request_id)
 		signers, err := h.ssh_agent.Signers()
 		var signer *ssh.Signer
 		if err != nil {
@@ -246,14 +246,13 @@ func (h *CertRequestHandler) sign_request(rw http.ResponseWriter, req *http.Requ
 			for i := range signers {
 				fp := ssh_ca.MakeFingerprint(signers[i].PublicKey().Marshal())
 				if fp == config.SigningKeyFingerprint {
-					log.Println("-- Cert will be signed by ", fp)
 					signer = &signers[i]
 					break
 				}
 			}
 		}
 		if signer == nil {
-			log.Println("Couldn't find signing key, unable to sign request")
+			log.Printf("Couldn't find signing key for request %s, unable to sign request\n", request_id)
 			http.Error(rw, "Couldn't find signing key, unable to sign. Sorry.", http.StatusNotFound)
 			return
 		}

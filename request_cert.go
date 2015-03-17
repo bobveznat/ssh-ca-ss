@@ -17,7 +17,7 @@ import (
 )
 
 func main() {
-	var principals_str, environment string
+	var principals_str, environment, reason string
 	var valid_before_dur, valid_after_dur time.Duration
 	command_line_has_errors := false
 
@@ -33,6 +33,7 @@ func main() {
 	flag.StringVar(&principals_str, "principals", "ec2-user,ubuntu", "Valid usernames for login. Comma separated.")
 	flag.StringVar(&environment, "environment", "", "The environment you want (e.g. prod).")
 	flag.StringVar(&config_path, "config_path", config_path, "Path to config json.")
+	flag.StringVar(&reason, "reason", "", "Reason for needing SSH certificate.")
 	flag.DurationVar(&valid_after_dur, "valid-after", valid_after_dur, "Relative time")
 	flag.DurationVar(&valid_before_dur, "valid-before", valid_before_dur, "Relative time")
 	flag.Parse()
@@ -43,6 +44,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	if reason == "" {
+		fmt.Println("Must give a reason for requesting this certificate.")
+		os.Exit(1)
+	}
 	if len(config) > 1 && environment == "" {
 		fmt.Println("You must tell me which environment to use.", len(config))
 		os.Exit(1)
@@ -144,6 +149,8 @@ func main() {
 	request_parameters["cert"][0] = base64.StdEncoding.EncodeToString(cert_request)
 	request_parameters["environment"] = make([]string, 1)
 	request_parameters["environment"][0] = environment
+	request_parameters["reason"] = make([]string, 1)
+	request_parameters["reason"][0] = reason
 	resp, err := http.PostForm(config[environment].SignerUrl+"cert/requests", request_parameters)
 	if err != nil {
 		fmt.Println("Error sending request to signer daemon:", err)
