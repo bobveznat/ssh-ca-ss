@@ -208,6 +208,7 @@ func (h *CertRequestHandler) get_request_status(rw http.ResponseWriter, req *htt
 		rw.Write([]byte(h.state[request_id].request.Type()))
 		rw.Write([]byte(" "))
 		rw.Write([]byte(base64.StdEncoding.EncodeToString(h.state[request_id].request.Marshal())))
+		rw.Write([]byte("\n"))
 	} else {
 		http.Error(rw, "Cert not signed yet.", http.StatusPreconditionFailed)
 	}
