@@ -134,6 +134,10 @@ func main() {
 	new_cert.ValidPrincipals = principals
 	new_cert.ValidAfter = valid_after
 	new_cert.ValidBefore = valid_before
+	new_cert.Extensions = make(map[string]string)
+	new_cert.Extensions["permit-agent-forwarding"] = ""
+	new_cert.Extensions["permit-port-forwarding"] = ""
+	new_cert.Extensions["permit-pty"] = ""
 
 	err = new_cert.SignCert(rand.Reader, signer)
 	if err != nil {
