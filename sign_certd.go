@@ -98,9 +98,10 @@ func (h *CertRequestHandler) create_signing_request(rw http.ResponseWriter, req 
 	h.state[request_id_str] = cert_request
 
 	rw.WriteHeader(http.StatusCreated)
+	requester_fp := ssh_ca.MakeFingerprint(request_data.cert.SignatureKey.Marshal())
 	rw.Write([]byte(request_id_str))
-	log.Printf("Cert request %s from %s principals %v valid from %d to %d for '%s'\n",
-		request_id_str, request_data.cert.KeyId,
+	log.Printf("Cert request %s from %s (%s) principals %v valid from %d to %d for '%s'\n",
+		request_id_str, requester_fp, config.AuthorizedUsers[requester_fp],
 		request_data.cert.ValidPrincipals, request_data.cert.ValidAfter, request_data.cert.ValidBefore, cert_request.reason)
 	return
 }
@@ -111,7 +112,7 @@ type SigningRequest struct {
 	cert        *ssh.Certificate
 }
 
-func (h *CertRequestHandler) extract_cert_from_request(req *http.Request, request_data *SigningRequest, authorized_signers []string) error {
+func (h *CertRequestHandler) extract_cert_from_request(req *http.Request, request_data *SigningRequest, authorized_signers map[string]string) error {
 
 	if req.PostForm["cert"] == nil || len(req.PostForm["cert"]) == 0 {
 		err := errors.New("Please specify exactly one cert request")
@@ -134,12 +135,9 @@ func (h *CertRequestHandler) extract_cert_from_request(req *http.Request, reques
 
 	var cert_checker ssh.CertChecker
 	cert_checker.IsAuthority = func(auth ssh.PublicKey) bool {
-		for _, v := range authorized_signers {
-			if v == ssh_ca.MakeFingerprint(auth.Marshal()) {
-				return true
-			}
-		}
-		return false
+		fingerprint := ssh_ca.MakeFingerprint(auth.Marshal())
+		_, ok := authorized_signers[fingerprint]
+		return ok
 	}
 	err = cert_checker.CheckCert(cert.ValidPrincipals[0], cert)
 	if err != nil {
@@ -234,7 +232,7 @@ func (h *CertRequestHandler) sign_request(rw http.ResponseWriter, req *http.Requ
 
 	signer_fp := ssh_ca.MakeFingerprint(request_data.cert.SignatureKey.Marshal())
 	h.state[request_id].signatures[signer_fp] = true
-	log.Printf("Signature for %s received from %s and determined valid\n", request_id, signer_fp)
+	log.Printf("Signature for %s received from %s (%s) and determined valid\n", request_id, signer_fp, config.AuthorizedSigners[signer_fp])
 
 	if len(h.state[request_id].signatures) >= config.NumberSignersRequired {
 		log.Printf("Received %d signatures for %s, signing now.\n", len(h.state[request_id].signatures), request_id)

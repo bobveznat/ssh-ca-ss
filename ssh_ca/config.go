@@ -12,8 +12,8 @@ type RequesterConfig struct {
 
 type SignerdConfig struct {
 	SigningKeyFingerprint string
-	AuthorizedSigners     []string
-	AuthorizedUsers       []string
+	AuthorizedSigners     map[string]string
+	AuthorizedUsers       map[string]string
 	NumberSignersRequired int
 }
 
