@@ -2,6 +2,7 @@ package main
 
 import (
 	"./ssh_ca"
+	"bytes"
 	"crypto/rand"
 	"encoding/base32"
 	"encoding/base64"
@@ -39,9 +40,10 @@ func new_cert_request() CertRequest {
 }
 
 type CertRequestHandler struct {
-	Config    map[string]ssh_ca.SignerdConfig
-	state     map[string]CertRequest
-	ssh_agent agent.Agent
+	Config     map[string]ssh_ca.SignerdConfig
+	state      map[string]CertRequest
+	ssh_agent  agent.Agent
+	NextSerial chan uint64
 }
 
 type CertRequestForm struct {
@@ -90,6 +92,7 @@ func (h *CertRequestHandler) create_signing_request(rw http.ResponseWriter, req 
 	request_id := make([]byte, 15)
 	rand.Reader.Read(request_id)
 	request_id_str := base32.StdEncoding.EncodeToString(request_id)
+	request_data.cert.Serial = <-h.NextSerial
 
 	cert_request := new_cert_request()
 	cert_request.request = request_data.cert
@@ -100,8 +103,8 @@ func (h *CertRequestHandler) create_signing_request(rw http.ResponseWriter, req 
 	rw.WriteHeader(http.StatusCreated)
 	requester_fp := ssh_ca.MakeFingerprint(request_data.cert.SignatureKey.Marshal())
 	rw.Write([]byte(request_id_str))
-	log.Printf("Cert request %s from %s (%s) principals %v valid from %d to %d for '%s'\n",
-		request_id_str, requester_fp, config.AuthorizedUsers[requester_fp],
+	log.Printf("Cert request serial %d id %s from %s (%s) principals %v valid from %d to %d for '%s'\n",
+		request_data.cert.Serial, request_id_str, requester_fp, config.AuthorizedUsers[requester_fp],
 		request_data.cert.ValidPrincipals, request_data.cert.ValidAfter, request_data.cert.ValidBefore, cert_request.reason)
 	return
 }
@@ -215,6 +218,12 @@ func (h *CertRequestHandler) sign_request(rw http.ResponseWriter, req *http.Requ
 	uri_vars := mux.Vars(req)
 	request_id := uri_vars["request_id"]
 
+	_, ok := h.state[request_id]
+	if !ok {
+		http.Error(rw, "Unknown request id", http.StatusNotFound)
+		return
+	}
+
 	var request_data SigningRequest
 	config, environment, err := h.form_boilerplate(req)
 	request_data.config = config
@@ -223,6 +232,7 @@ func (h *CertRequestHandler) sign_request(rw http.ResponseWriter, req *http.Requ
 		http.Error(rw, fmt.Sprintf("%v", err), http.StatusBadRequest)
 		return
 	}
+
 	err = h.extract_cert_from_request(req, &request_data, config.AuthorizedSigners)
 	if err != nil {
 		log.Println("Invalid certificate signing request received, ignoring")
@@ -231,8 +241,29 @@ func (h *CertRequestHandler) sign_request(rw http.ResponseWriter, req *http.Requ
 	}
 
 	signer_fp := ssh_ca.MakeFingerprint(request_data.cert.SignatureKey.Marshal())
+
+	// Verifying that the cert being posted to us here matches the one in the
+	// request. That is, that an attacker isn't use an old signature to sign a
+	// new/different request id
+	requested_cert := h.state[request_id].request
+	request_data.cert.SignatureKey = requested_cert.SignatureKey
+	request_data.cert.Signature = nil
+	requested_cert.Signature = nil
+	// Resetting the Nonce felt wrong. But it turns out that when the signer
+	// signs the request the act of signing generates a new Nonce. So it will
+	// never match.
+	requested_cert.Nonce = []byte("")
+	request_data.cert.Nonce = []byte("")
+	if !bytes.Equal(requested_cert.Marshal(), request_data.cert.Marshal()) {
+		log.Println("Signature was valid, but cert didn't match.")
+		log.Printf("Orig req: %#v\n", requested_cert)
+		log.Printf("Sign req: %#v\n", request_data.cert)
+		http.Error(rw, "Signature was valid, but cert didn't match.", http.StatusBadRequest)
+		return
+	}
+
 	h.state[request_id].signatures[signer_fp] = true
-	log.Printf("Signature for %s received from %s (%s) and determined valid\n", request_id, signer_fp, config.AuthorizedSigners[signer_fp])
+	log.Printf("Signature for serial %d id %s received from %s (%s) and determined valid\n", request_data.cert.Serial, request_id, signer_fp, config.AuthorizedSigners[signer_fp])
 
 	if len(h.state[request_id].signatures) >= config.NumberSignersRequired {
 		log.Printf("Received %d signatures for %s, signing now.\n", len(h.state[request_id].signatures), request_id)
@@ -290,6 +321,13 @@ func main() {
 	var request_handler CertRequestHandler
 	request_handler.Config = config
 	request_handler.state = make(map[string]CertRequest)
+	request_handler.NextSerial = make(chan uint64)
+	go func() {
+		var serial uint64
+		for serial = 1; ; serial++ {
+			request_handler.NextSerial <- serial
+		}
+	}()
 	request_handler.ssh_agent = ssh_agent
 
 	r := mux.NewRouter()
