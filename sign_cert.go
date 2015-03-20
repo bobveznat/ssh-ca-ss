@@ -90,6 +90,10 @@ func main() {
 	request_parameters["cert_request_id"] = make([]string, 1)
 	request_parameters["cert_request_id"][0] = cert_request_id
 	get_resp, err := http.Get(config.SignerUrl + "cert/requests?" + request_parameters.Encode())
+	if err != nil {
+		fmt.Println("Didn't get a valid response", err)
+		os.Exit(1)
+	}
 	get_resp_buf := make([]byte, 4096)
 	bytes_read, _ := get_resp.Body.Read(get_resp_buf)
 	get_resp.Body.Close()
