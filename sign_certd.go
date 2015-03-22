@@ -23,18 +23,20 @@ import (
 const MAX_SIGNERS_ALLOWED = 5
 
 type CertRequest struct {
+	// This struct tracks state for certificate requests. Imagine this one day
+	// being stored in a persistent data store.
 	request     *ssh.Certificate
-	submit_time time.Time
+	submitTime  time.Time
 	environment string
 	signatures  map[string]bool
-	cert_signed bool
+	certSigned  bool
 	reason      string
 }
 
-func new_cert_request() CertRequest {
+func newCertRequest() CertRequest {
 	var cr CertRequest
-	cr.submit_time = time.Now()
-	cr.cert_signed = false
+	cr.submitTime = time.Now()
+	cr.certSigned = false
 	cr.signatures = make(map[string]bool)
 	return cr
 }
@@ -42,15 +44,17 @@ func new_cert_request() CertRequest {
 type CertRequestHandler struct {
 	Config     map[string]ssh_ca.SignerdConfig
 	state      map[string]CertRequest
-	ssh_agent  agent.Agent
+	sshAgent   agent.Agent
 	NextSerial chan uint64
 }
 
-type CertRequestForm struct {
-	cert string
+type signingRequest struct {
+	config      *ssh_ca.SignerdConfig
+	environment string
+	cert        *ssh.Certificate
 }
 
-func (h *CertRequestHandler) form_boilerplate(req *http.Request) (*ssh_ca.SignerdConfig, string, error) {
+func (h *CertRequestHandler) formBoilerplate(req *http.Request) (*ssh_ca.SignerdConfig, string, error) {
 	err := req.ParseForm()
 	if err != nil {
 		err := errors.New(fmt.Sprintf("%v", err))
@@ -69,16 +73,16 @@ func (h *CertRequestHandler) form_boilerplate(req *http.Request) (*ssh_ca.Signer
 	return &config, environment, nil
 }
 
-func (h *CertRequestHandler) create_signing_request(rw http.ResponseWriter, req *http.Request) {
-	var request_data SigningRequest
-	config, environment, err := h.form_boilerplate(req)
-	request_data.config = config
-	request_data.environment = environment
+func (h *CertRequestHandler) createSigningRequest(rw http.ResponseWriter, req *http.Request) {
+	var requestData signingRequest
+	config, environment, err := h.formBoilerplate(req)
+	requestData.config = config
+	requestData.environment = environment
 	if err != nil {
 		http.Error(rw, fmt.Sprintf("%v", err), http.StatusBadRequest)
 		return
 	}
-	err = h.extract_cert_from_request(req, &request_data, config.AuthorizedUsers)
+	err = h.extractCertFromRequest(req, &requestData, config.AuthorizedUsers)
 	if err != nil {
 		http.Error(rw, fmt.Sprintf("%v", err), http.StatusBadRequest)
 		return
@@ -89,52 +93,51 @@ func (h *CertRequestHandler) create_signing_request(rw http.ResponseWriter, req 
 		return
 	}
 
-	request_id := make([]byte, 15)
-	rand.Reader.Read(request_id)
-	request_id_str := base32.StdEncoding.EncodeToString(request_id)
-	request_data.cert.Serial = <-h.NextSerial
+	requester_fp := ssh_ca.MakeFingerprint(requestData.cert.SignatureKey.Marshal())
 
-	cert_request := new_cert_request()
-	cert_request.request = request_data.cert
-	cert_request.environment = request_data.environment
-	cert_request.reason = req.Form["reason"][0]
-	h.state[request_id_str] = cert_request
+	requestId := make([]byte, 15)
+	rand.Reader.Read(requestId)
+	requestIdStr := base32.StdEncoding.EncodeToString(requestId)
+	requestData.cert.Serial = <-h.NextSerial
+
+    // We override keyid here so that its a server controlled value. Instead of
+    // letting a requester attempt to spoof it.
+    requestData.cert.KeyId = config.AuthorizedUsers[requester_fp]
+
+	certRequest := newCertRequest()
+	certRequest.request = requestData.cert
+	certRequest.environment = requestData.environment
+	certRequest.reason = req.Form["reason"][0]
+	h.state[requestIdStr] = certRequest
 
 	rw.WriteHeader(http.StatusCreated)
-	requester_fp := ssh_ca.MakeFingerprint(request_data.cert.SignatureKey.Marshal())
-	rw.Write([]byte(request_id_str))
+	rw.Write([]byte(requestIdStr))
 	log.Printf("Cert request serial %d id %s from %s (%s) principals %v valid from %d to %d for '%s'\n",
-		request_data.cert.Serial, request_id_str, requester_fp, config.AuthorizedUsers[requester_fp],
-		request_data.cert.ValidPrincipals, request_data.cert.ValidAfter, request_data.cert.ValidBefore, cert_request.reason)
+		requestData.cert.Serial, requestIdStr, requester_fp, config.AuthorizedUsers[requester_fp],
+		requestData.cert.ValidPrincipals, requestData.cert.ValidAfter, requestData.cert.ValidBefore, certRequest.reason)
 	return
 }
 
-type SigningRequest struct {
-	config      *ssh_ca.SignerdConfig
-	environment string
-	cert        *ssh.Certificate
-}
-
-func (h *CertRequestHandler) extract_cert_from_request(req *http.Request, request_data *SigningRequest, authorized_signers map[string]string) error {
+func (h *CertRequestHandler) extractCertFromRequest(req *http.Request, requestData *signingRequest, authorized_signers map[string]string) error {
 
 	if req.PostForm["cert"] == nil || len(req.PostForm["cert"]) == 0 {
 		err := errors.New("Please specify exactly one cert request")
 		return err
 	}
 
-	raw_cert_request, err := base64.StdEncoding.DecodeString(req.PostForm["cert"][0])
+	raw_certRequest, err := base64.StdEncoding.DecodeString(req.PostForm["cert"][0])
 	if err != nil {
 		err := errors.New("Unable to base64 decode cert request")
 		return err
 	}
-	pub_key, err := ssh.ParsePublicKey(raw_cert_request)
+	pub_key, err := ssh.ParsePublicKey(raw_certRequest)
 	if err != nil {
 		err := errors.New("Unable to parse cert request")
 		return err
 	}
 
 	cert := pub_key.(*ssh.Certificate)
-	request_data.cert = cert
+	requestData.cert = cert
 
 	var cert_checker ssh.CertChecker
 	cert_checker.IsAuthority = func(auth ssh.PublicKey) bool {
@@ -150,17 +153,17 @@ func (h *CertRequestHandler) extract_cert_from_request(req *http.Request, reques
 	return nil
 }
 
-func (h *CertRequestHandler) list_pending_requests(rw http.ResponseWriter, req *http.Request) {
-	_, environment, err := h.form_boilerplate(req)
+func (h *CertRequestHandler) listPendingRequests(rw http.ResponseWriter, req *http.Request) {
+	_, environment, err := h.formBoilerplate(req)
 	if err != nil {
 		http.Error(rw, fmt.Sprintf("%v", err), http.StatusBadRequest)
 		return
 	}
 
-	var cert_request_id string
-	cert_request_ids, ok := req.Form["cert_request_id"]
+	var certRequestId string
+	certRequestIds, ok := req.Form["certRequestId"]
 	if ok {
-		cert_request_id = cert_request_ids[0]
+		certRequestId = certRequestIds[0]
 	}
 
 	found_something := false
@@ -168,13 +171,13 @@ func (h *CertRequestHandler) list_pending_requests(rw http.ResponseWriter, req *
 	for k, v := range h.state {
 		if v.environment == environment {
 			encoded_cert := base64.StdEncoding.EncodeToString(v.request.Marshal())
-			// Two ways to use this URL. If caller specified a cert_request_id
+			// Two ways to use this URL. If caller specified a certRequestId
 			// then we return only that one. Otherwise everything.
-			if cert_request_id == "" {
+			if certRequestId == "" {
 				results[k] = encoded_cert
 				found_something = true
 			} else {
-				if cert_request_id == k {
+				if certRequestId == k {
 					results[k] = encoded_cert
 					found_something = true
 					break
@@ -195,79 +198,79 @@ func (h *CertRequestHandler) list_pending_requests(rw http.ResponseWriter, req *
 	}
 }
 
-func (h *CertRequestHandler) get_request_status(rw http.ResponseWriter, req *http.Request) {
+func (h *CertRequestHandler) getRequestStatus(rw http.ResponseWriter, req *http.Request) {
 	uri_vars := mux.Vars(req)
-	request_id := uri_vars["request_id"]
+	requestId := uri_vars["requestId"]
 
 	type Response struct {
-		cert_signed bool
-		cert        string
+		certSigned bool
+		cert       string
 	}
-	if h.state[request_id].cert_signed == true {
-		rw.Write([]byte(h.state[request_id].request.Type()))
+	if h.state[requestId].certSigned == true {
+		rw.Write([]byte(h.state[requestId].request.Type()))
 		rw.Write([]byte(" "))
-		rw.Write([]byte(base64.StdEncoding.EncodeToString(h.state[request_id].request.Marshal())))
+		rw.Write([]byte(base64.StdEncoding.EncodeToString(h.state[requestId].request.Marshal())))
 		rw.Write([]byte("\n"))
 	} else {
 		http.Error(rw, "Cert not signed yet.", http.StatusPreconditionFailed)
 	}
 }
 
-func (h *CertRequestHandler) sign_request(rw http.ResponseWriter, req *http.Request) {
+func (h *CertRequestHandler) signRequest(rw http.ResponseWriter, req *http.Request) {
 
 	uri_vars := mux.Vars(req)
-	request_id := uri_vars["request_id"]
+	requestId := uri_vars["requestId"]
 
-	_, ok := h.state[request_id]
+	_, ok := h.state[requestId]
 	if !ok {
 		http.Error(rw, "Unknown request id", http.StatusNotFound)
 		return
 	}
 
-	var request_data SigningRequest
-	config, environment, err := h.form_boilerplate(req)
-	request_data.config = config
-	request_data.environment = environment
+	var requestData signingRequest
+	config, environment, err := h.formBoilerplate(req)
+	requestData.config = config
+	requestData.environment = environment
 	if err != nil {
 		http.Error(rw, fmt.Sprintf("%v", err), http.StatusBadRequest)
 		return
 	}
 
-	err = h.extract_cert_from_request(req, &request_data, config.AuthorizedSigners)
+	err = h.extractCertFromRequest(req, &requestData, config.AuthorizedSigners)
 	if err != nil {
 		log.Println("Invalid certificate signing request received, ignoring")
 		http.Error(rw, fmt.Sprintf("%v", err), http.StatusBadRequest)
 		return
 	}
 
-	signer_fp := ssh_ca.MakeFingerprint(request_data.cert.SignatureKey.Marshal())
+	signerFp := ssh_ca.MakeFingerprint(requestData.cert.SignatureKey.Marshal())
 
 	// Verifying that the cert being posted to us here matches the one in the
 	// request. That is, that an attacker isn't use an old signature to sign a
 	// new/different request id
-	requested_cert := h.state[request_id].request
-	request_data.cert.SignatureKey = requested_cert.SignatureKey
-	request_data.cert.Signature = nil
-	requested_cert.Signature = nil
+	requestedCert := h.state[requestId].request
+	requestData.cert.SignatureKey = requestedCert.SignatureKey
+	requestData.cert.Signature = nil
+	requestedCert.Signature = nil
 	// Resetting the Nonce felt wrong. But it turns out that when the signer
 	// signs the request the act of signing generates a new Nonce. So it will
 	// never match.
-	requested_cert.Nonce = []byte("")
-	request_data.cert.Nonce = []byte("")
-	if !bytes.Equal(requested_cert.Marshal(), request_data.cert.Marshal()) {
+	requestedCert.Nonce = []byte("")
+	requestData.cert.Nonce = []byte("")
+	if !bytes.Equal(requestedCert.Marshal(), requestData.cert.Marshal()) {
 		log.Println("Signature was valid, but cert didn't match.")
-		log.Printf("Orig req: %#v\n", requested_cert)
-		log.Printf("Sign req: %#v\n", request_data.cert)
+		log.Printf("Orig req: %#v\n", requestedCert)
+		log.Printf("Sign req: %#v\n", requestData.cert)
 		http.Error(rw, "Signature was valid, but cert didn't match.", http.StatusBadRequest)
 		return
 	}
 
-	h.state[request_id].signatures[signer_fp] = true
-	log.Printf("Signature for serial %d id %s received from %s (%s) and determined valid\n", request_data.cert.Serial, request_id, signer_fp, config.AuthorizedSigners[signer_fp])
+	h.state[requestId].signatures[signerFp] = true
+	log.Printf("Signature for serial %d id %s received from %s (%s) and determined valid\n", requestData.cert.Serial, requestId, signerFp, config.AuthorizedSigners[signerFp])
 
-	if len(h.state[request_id].signatures) >= config.NumberSignersRequired {
-		log.Printf("Received %d signatures for %s, signing now.\n", len(h.state[request_id].signatures), request_id)
-		signers, err := h.ssh_agent.Signers()
+	if len(h.state[requestId].signatures) >= config.NumberSignersRequired {
+		log.Printf("Received %d signatures for %s, signing now.\n", len(h.state[requestId].signatures), requestId)
+		signers, err := h.sshAgent.Signers()
 		var signer *ssh.Signer
 		if err != nil {
 			log.Println("No keys found.")
@@ -281,15 +284,15 @@ func (h *CertRequestHandler) sign_request(rw http.ResponseWriter, req *http.Requ
 			}
 		}
 		if signer == nil {
-			log.Printf("Couldn't find signing key for request %s, unable to sign request\n", request_id)
+			log.Printf("Couldn't find signing key for request %s, unable to sign request\n", requestId)
 			http.Error(rw, "Couldn't find signing key, unable to sign. Sorry.", http.StatusNotFound)
 			return
 		}
-		state_info := h.state[request_id]
-		state_info.request.SignCert(rand.Reader, *signer)
-		state_info.cert_signed = true
+		stateInfo := h.state[requestId]
+		stateInfo.request.SignCert(rand.Reader, *signer)
+		stateInfo.certSigned = true
 		// this is weird. see: https://code.google.com/p/go/issues/detail?id=3117
-		h.state[request_id] = state_info
+		h.state[requestId] = stateInfo
 	}
 
 }
@@ -299,11 +302,11 @@ func main() {
 	if home == "" {
 		home = "/"
 	}
-	config_path := home + "/.ssh_ca/sign_certd_config.json"
-	flag.StringVar(&config_path, "config_path", config_path, "Path to config json.")
+	configPath := home + "/.ssh_ca/sign_certd_config.json"
+	flag.StringVar(&configPath, "configPath", configPath, "Path to config json.")
 	flag.Parse()
 
-	config, err := ssh_ca.LoadSignerdConfig(config_path)
+	config, err := ssh_ca.LoadSignerdConfig(configPath)
 	if err != nil {
 		log.Println("Load Config failed:", err)
 		os.Exit(1)
@@ -316,26 +319,26 @@ func main() {
 		log.Println("Dial failed:", err)
 		os.Exit(1)
 	}
-	ssh_agent := agent.NewClient(conn)
+	sshAgent := agent.NewClient(conn)
 
-	var request_handler CertRequestHandler
-	request_handler.Config = config
-	request_handler.state = make(map[string]CertRequest)
-	request_handler.NextSerial = make(chan uint64)
+	var requestHandler CertRequestHandler
+	requestHandler.Config = config
+	requestHandler.state = make(map[string]CertRequest)
+	requestHandler.NextSerial = make(chan uint64)
 	go func() {
 		var serial uint64
 		for serial = 1; ; serial++ {
-			request_handler.NextSerial <- serial
+			requestHandler.NextSerial <- serial
 		}
 	}()
-	request_handler.ssh_agent = ssh_agent
+	requestHandler.sshAgent = sshAgent
 
 	r := mux.NewRouter()
 	requests := r.Path("/cert/requests").Subrouter()
-	requests.Methods("POST").HandlerFunc(request_handler.create_signing_request)
-	requests.Methods("GET").HandlerFunc(request_handler.list_pending_requests)
-	request := r.Path("/cert/requests/{request_id}").Subrouter()
-	request.Methods("GET").HandlerFunc(request_handler.get_request_status)
-	request.Methods("POST").HandlerFunc(request_handler.sign_request)
+	requests.Methods("POST").HandlerFunc(requestHandler.createSigningRequest)
+	requests.Methods("GET").HandlerFunc(requestHandler.listPendingRequests)
+	request := r.Path("/cert/requests/{requestId}").Subrouter()
+	request.Methods("GET").HandlerFunc(requestHandler.getRequestStatus)
+	request.Methods("POST").HandlerFunc(requestHandler.signRequest)
 	http.ListenAndServe(":8080", r)
 }

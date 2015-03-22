@@ -21,49 +21,49 @@ import (
 type CertRequestResponse map[string]string
 
 func main() {
-	var environment, cert_request_id string
+	var environment, certRequestId string
 
 	home := os.Getenv("HOME")
 	if home == "" {
 		home = "/"
 	}
-	config_path := home + "/.ssh_ca/signer_config.json"
+	configPath := home + "/.ssh_ca/signer_config.json"
 
 	flag.StringVar(&environment, "environment", "", "The environment you want (e.g. prod).")
-	flag.StringVar(&config_path, "config_path", config_path, "Path to config json.")
-	flag.StringVar(&cert_request_id, "cert-request-id", cert_request_id, "ID of cert request.")
+	flag.StringVar(&configPath, "configPath", configPath, "Path to config json.")
+	flag.StringVar(&certRequestId, "cert-request-id", certRequestId, "ID of cert request.")
 	flag.Parse()
 
-	all_config, err := ssh_ca.LoadSignerConfig(config_path)
+	allConfig, err := ssh_ca.LoadSignerConfig(configPath)
 	if err != nil {
 		fmt.Println("Load Config failed:", err)
 		os.Exit(1)
 	}
 
-	if cert_request_id == "" {
+	if certRequestId == "" {
 		fmt.Println("Specify --cert-request-id")
 		os.Exit(1)
 	}
 
-	if len(all_config) > 1 && environment == "" {
-		fmt.Println("You must tell me which environment to use.", len(all_config))
+	if len(allConfig) > 1 && environment == "" {
+		fmt.Println("You must tell me which environment to use.", len(allConfig))
 		os.Exit(1)
 	}
-	if len(all_config) == 1 && environment == "" {
-		for environment = range all_config {
+	if len(allConfig) == 1 && environment == "" {
+		for environment = range allConfig {
 			// lame way of extracting first and only key from a map?
 		}
 	}
-	config := all_config[environment]
+	config := allConfig[environment]
 
 	conn, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK"))
 	if err != nil {
 		fmt.Println("Dial failed:", err)
 		os.Exit(1)
 	}
-	ssh_agent := agent.NewClient(conn)
+	sshAgent := agent.NewClient(conn)
 
-	signers, err := ssh_agent.Signers()
+	signers, err := sshAgent.Signers()
 	var signer ssh.Signer
 	signer = nil
 	if err != nil {
@@ -72,8 +72,8 @@ func main() {
 		os.Exit(1)
 	} else {
 		for i := range signers {
-			signer_fingerprint := ssh_ca.MakeFingerprint(signers[i].PublicKey().Marshal())
-			if signer_fingerprint == config.KeyFingerprint {
+			signerFingerprint := ssh_ca.MakeFingerprint(signers[i].PublicKey().Marshal())
+			if signerFingerprint == config.KeyFingerprint {
 				signer = signers[i]
 				break
 			}
@@ -84,39 +84,42 @@ func main() {
 		os.Exit(1)
 	}
 
-	request_parameters := make(url.Values)
-	request_parameters["environment"] = make([]string, 1)
-	request_parameters["environment"][0] = environment
-	request_parameters["cert_request_id"] = make([]string, 1)
-	request_parameters["cert_request_id"][0] = cert_request_id
-	get_resp, err := http.Get(config.SignerUrl + "cert/requests?" + request_parameters.Encode())
+	requestParameters := make(url.Values)
+	requestParameters["environment"] = make([]string, 1)
+	requestParameters["environment"][0] = environment
+	requestParameters["certRequestId"] = make([]string, 1)
+	requestParameters["certRequestId"][0] = certRequestId
+	getResp, err := http.Get(config.SignerUrl + "cert/requests?" + requestParameters.Encode())
 	if err != nil {
 		fmt.Println("Didn't get a valid response", err)
 		os.Exit(1)
 	}
-	get_resp_buf := make([]byte, 4096)
-	bytes_read, _ := get_resp.Body.Read(get_resp_buf)
-	get_resp.Body.Close()
-	if get_resp.StatusCode != 200 {
-		fmt.Println("Error getting that request id:", string(get_resp_buf))
+	getRespBuf := make([]byte, 4096)
+	bytesRead, _ := getResp.Body.Read(getRespBuf)
+	getResp.Body.Close()
+	if getResp.StatusCode != 200 {
+		fmt.Println("Error getting that request id:", string(getRespBuf))
 		os.Exit(1)
 	}
-	get_response := make(CertRequestResponse)
-	err = json.Unmarshal(get_resp_buf[:bytes_read], &get_response)
+	getResponse := make(CertRequestResponse)
+	err = json.Unmarshal(getRespBuf[:bytesRead], &getResponse)
 	if err != nil {
 		fmt.Println("Unable to unmarshall response", err)
 		os.Exit(1)
 	}
-	parseable_cert := []byte("ssh-rsa-cert-v01@openssh.com " + get_response[cert_request_id])
-	pub_key, _, _, _, err := ssh.ParseAuthorizedKey(parseable_cert)
+	parseableCert := []byte("ssh-rsa-cert-v01@openssh.com " + getResponse[certRequestId])
+	pubKey, _, _, _, err := ssh.ParseAuthorizedKey(parseableCert)
 	if err != nil {
 		fmt.Println("Trouble parsing response", err)
 		os.Exit(1)
 	}
-	cert := pub_key.(*ssh.Certificate)
+	cert := pubKey.(*ssh.Certificate)
 	fmt.Println("Certificate data:")
 	fmt.Printf("  Serial: %v\n", cert.Serial)
 	fmt.Printf("  Key id: %v\n", cert.KeyId)
+	fmt.Printf("  Principals: %v\n", cert.ValidPrincipals)
+	fmt.Printf("  Options: %v\n", cert.Permissions.CriticalOptions)
+	fmt.Printf("  Permissions: %v\n", cert.Permissions.Extensions)
 	fmt.Printf("  Valid for public key: %s\n", ssh_ca.MakeFingerprint(cert.Key.Marshal()))
 	fmt.Printf("  Valid from %v - %v\n",
 		time.Unix(int64(cert.ValidAfter), 0), time.Unix(int64(cert.ValidBefore), 0))
@@ -134,14 +137,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	signed_request := cert.Marshal()
+	signedRequest := cert.Marshal()
 
-	request_parameters = make(url.Values)
-	request_parameters["cert"] = make([]string, 1)
-	request_parameters["cert"][0] = base64.StdEncoding.EncodeToString(signed_request)
-	request_parameters["environment"] = make([]string, 1)
-	request_parameters["environment"][0] = environment
-	resp, err := http.PostForm(config.SignerUrl+"cert/requests/"+cert_request_id, request_parameters)
+	requestParameters = make(url.Values)
+	requestParameters["cert"] = make([]string, 1)
+	requestParameters["cert"][0] = base64.StdEncoding.EncodeToString(signedRequest)
+	requestParameters["environment"] = make([]string, 1)
+	requestParameters["environment"][0] = environment
+	resp, err := http.PostForm(config.SignerUrl+"cert/requests/"+certRequestId, requestParameters)
 	if err != nil {
 		fmt.Println("Error sending request to signer daemon:", err)
 		os.Exit(1)
@@ -152,9 +155,9 @@ func main() {
 	} else {
 		fmt.Println("Cert signature not accepted.")
 		fmt.Println("HTTP status", resp.Status)
-		resp_buf := make([]byte, 1024)
-		resp.Body.Read(resp_buf)
-		fmt.Println(string(resp_buf))
+		respBuf := make([]byte, 1024)
+		resp.Body.Read(respBuf)
+		fmt.Println(string(respBuf))
 		os.Exit(1)
 	}
 
