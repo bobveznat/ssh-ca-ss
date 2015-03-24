@@ -18,10 +18,10 @@ import (
 	"time"
 )
 
-type CertRequestResponse map[string]string
+type certRequestResponse map[string]string
 
 func main() {
-	var environment, certRequestId string
+	var environment, certRequestID string
 
 	home := os.Getenv("HOME")
 	if home == "" {
@@ -31,7 +31,7 @@ func main() {
 
 	flag.StringVar(&environment, "environment", "", "The environment you want (e.g. prod).")
 	flag.StringVar(&configPath, "configPath", configPath, "Path to config json.")
-	flag.StringVar(&certRequestId, "cert-request-id", certRequestId, "ID of cert request.")
+	flag.StringVar(&certRequestID, "cert-request-id", certRequestID, "ID of cert request.")
 	flag.Parse()
 
 	allConfig, err := ssh_ca.LoadSignerConfig(configPath)
@@ -40,7 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if certRequestId == "" {
+	if certRequestID == "" {
 		fmt.Println("Specify --cert-request-id")
 		os.Exit(1)
 	}
@@ -88,7 +88,7 @@ func main() {
 	requestParameters["environment"] = make([]string, 1)
 	requestParameters["environment"][0] = environment
 	requestParameters["certRequestId"] = make([]string, 1)
-	requestParameters["certRequestId"][0] = certRequestId
+	requestParameters["certRequestId"][0] = certRequestID
 	getResp, err := http.Get(config.SignerUrl + "cert/requests?" + requestParameters.Encode())
 	if err != nil {
 		fmt.Println("Didn't get a valid response", err)
@@ -101,13 +101,13 @@ func main() {
 		fmt.Println("Error getting that request id:", string(getRespBuf))
 		os.Exit(1)
 	}
-	getResponse := make(CertRequestResponse)
+	getResponse := make(certRequestResponse)
 	err = json.Unmarshal(getRespBuf[:bytesRead], &getResponse)
 	if err != nil {
 		fmt.Println("Unable to unmarshall response", err)
 		os.Exit(1)
 	}
-	parseableCert := []byte("ssh-rsa-cert-v01@openssh.com " + getResponse[certRequestId])
+	parseableCert := []byte("ssh-rsa-cert-v01@openssh.com " + getResponse[certRequestID])
 	pubKey, _, _, _, err := ssh.ParseAuthorizedKey(parseableCert)
 	if err != nil {
 		fmt.Println("Trouble parsing response", err)
@@ -150,7 +150,7 @@ func main() {
 	requestParameters["cert"][0] = base64.StdEncoding.EncodeToString(signedRequest)
 	requestParameters["environment"] = make([]string, 1)
 	requestParameters["environment"][0] = environment
-	resp, err := http.PostForm(config.SignerUrl+"cert/requests/"+certRequestId, requestParameters)
+	resp, err := http.PostForm(config.SignerUrl+"cert/requests/"+certRequestID, requestParameters)
 	if err != nil {
 		fmt.Println("Error sending request to signer daemon:", err)
 		os.Exit(1)
