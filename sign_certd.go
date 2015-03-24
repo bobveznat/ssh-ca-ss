@@ -1,7 +1,6 @@
 package main
 
 import (
-	"./ssh_ca"
 	"bytes"
 	"crypto/rand"
 	"encoding/base32"
@@ -10,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/bobveznat/ssh-ca-ss"
 	"github.com/gorilla/mux"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"

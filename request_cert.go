@@ -1,11 +1,11 @@
 package main
 
 import (
-	"./ssh_ca"
 	"crypto/rand"
 	"encoding/base64"
 	"flag"
 	"fmt"
+	"github.com/bobveznat/ssh-ca-ss"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"net"

@@ -1,13 +1,13 @@
 package main
 
 import (
-	"./ssh_ca"
 	"bufio"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/bobveznat/ssh-ca-ss"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"net"
@@ -121,14 +121,14 @@ func main() {
 	fmt.Printf("  Options: %v\n", cert.Permissions.CriticalOptions)
 	fmt.Printf("  Permissions: %v\n", cert.Permissions.Extensions)
 	fmt.Printf("  Valid for public key: %s\n", ssh_ca.MakeFingerprint(cert.Key.Marshal()))
-    var colorStart, colorEnd string
-    if uint64(time.Now().Unix() + 3600 * 24) < cert.ValidBefore {
-        colorStart = "\033[91m"
-        colorEnd = "\033[0m"
-    }
+	var colorStart, colorEnd string
+	if uint64(time.Now().Unix()+3600*24) < cert.ValidBefore {
+		colorStart = "\033[91m"
+		colorEnd = "\033[0m"
+	}
 	fmt.Printf("  Valid from %v - %s%v%s\n",
 		time.Unix(int64(cert.ValidAfter), 0),
-        colorStart, time.Unix(int64(cert.ValidBefore), 0), colorEnd)
+		colorStart, time.Unix(int64(cert.ValidBefore), 0), colorEnd)
 	fmt.Printf("Type 'yes' if you'd like to sign this cert request ")
 	reader := bufio.NewReader(os.Stdin)
 	text, _ := reader.ReadString('\n')
