@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"flag"
 	"fmt"
-	"github.com/bobveznat/ssh-ca-ss"
+	"github.com/bobveznat/ssh-ca-ss/ssh_ca"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"net"

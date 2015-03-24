@@ -9,7 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/bobveznat/ssh-ca-ss"
+	"github.com/bobveznat/ssh-ca-ss/ssh_ca"
 	"github.com/gorilla/mux"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
