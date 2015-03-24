@@ -10,5 +10,3 @@ The requester then convinces one or more of his or her authorized friends (who a
 Once enough valid signatures are received the cert request is automatically signed using the signing key for the cert authority and made available for download by the requester using the request id.
 
 None of the code here ever sees or even attempts to look at secrets. All signing operations are performed by ssh-agent. In order to bootstrap the signing daemon you must ssh-add the signing key. In order to request a cert or sign someone's cert request the user must have the key used for signing loaded up in ssh-agent. Secrets are really hard to keep, we'll leave them in the memory space of ssh-agent.
-
-
