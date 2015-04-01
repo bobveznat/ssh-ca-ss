@@ -23,9 +23,13 @@ func (c *SshCertificate) GoString() string {
 
 	output += fmt.Sprintf("Cert serial: %v\n", c.Serial)
 	output += fmt.Sprintf("Cert valid for public key: %s\n", MakeFingerprint(c.Key.Marshal()))
-	output += fmt.Sprintf("Valid between %v and %v\n",
-		time.Unix(int64(c.ValidAfter), 0), time.Unix(int64(c.ValidBefore), 0))
+	output += c.ValidityPeriodString()
 	return output
+}
+
+func (c *SshCertificate) ValidityPeriodString() string {
+	return fmt.Sprintf("Valid between %v and %v\n",
+		time.Unix(int64(c.ValidAfter), 0), time.Unix(int64(c.ValidBefore), 0))
 }
 
 func MakeFingerprint(key_blob []byte) string {
