@@ -110,9 +110,9 @@ func (h *certRequestHandler) createSigningRequest(rw http.ResponseWriter, req *h
 
 	rw.WriteHeader(http.StatusCreated)
 	rw.Write([]byte(requestIDStr))
-	log.Printf("Cert request serial %d id %s from %s (%s) principals %v valid from %d to %d for '%s'\n",
-		requestData.cert.Serial, requestIDStr, requesterFp, config.AuthorizedUsers[requesterFp],
-		requestData.cert.ValidPrincipals, requestData.cert.ValidAfter, requestData.cert.ValidBefore, certRequest.reason)
+	log.Printf("Cert request serial %d id %s env %s from %s (%s) @ %s principals %v valid from %d to %d for '%s'\n",
+		requestData.cert.Serial, requestIDStr, requestData.environment, requesterFp, config.AuthorizedUsers[requesterFp],
+		req.RemoteAddr, requestData.cert.ValidPrincipals, requestData.cert.ValidAfter, requestData.cert.ValidBefore, certRequest.reason)
 	return
 }
 
@@ -278,7 +278,8 @@ func (h *certRequestHandler) signRequest(rw http.ResponseWriter, req *http.Reque
 	}
 
 	h.state[requestID].signatures[signerFp] = true
-	log.Printf("Signature for serial %d id %s received from %s (%s) and determined valid\n", requestData.cert.Serial, requestID, signerFp, config.AuthorizedSigners[signerFp])
+	log.Printf("Signature for serial %d id %s received from %s (%s) @ %s and determined valid\n",
+		requestData.cert.Serial, requestID, signerFp, config.AuthorizedSigners[signerFp], req.RemoteAddr)
 
 	if len(h.state[requestID].signatures) >= config.NumberSignersRequired {
 		log.Printf("Received %d signatures for %s, signing now.\n", len(h.state[requestID].signatures), requestID)
