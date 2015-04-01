@@ -8,6 +8,7 @@ import (
 	"github.com/bobveznat/ssh-ca-ss/ssh_ca"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -146,8 +147,6 @@ func main() {
 	}
 
 	certRequest := newCert.Marshal()
-	fmt.Printf("And that is:\n%s\n", newCert.GoString())
-
 	requestParameters := make(url.Values)
 	requestParameters["cert"] = make([]string, 1)
 	requestParameters["cert"][0] = base64.StdEncoding.EncodeToString(certRequest)
@@ -161,8 +160,11 @@ func main() {
 		os.Exit(1)
 	}
 	defer resp.Body.Close()
-	respBuf := make([]byte, 1024)
-	resp.Body.Read(respBuf)
+	respBuf, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Error retrieving response to our request. Try again?", err)
+		os.Exit(1)
+	}
 	if resp.StatusCode == 201 {
 		fmt.Printf("Cert request id: %s\n", string(respBuf))
 	} else {
