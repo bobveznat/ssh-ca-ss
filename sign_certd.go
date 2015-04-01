@@ -151,35 +151,49 @@ func (h *certRequestHandler) extractCertFromRequest(req *http.Request, requestDa
 	return nil
 }
 
+type listResponseElement struct {
+	Environment string
+	Reason      string
+	CertBlob    string
+}
+
+func newResponseElement(environment string, reason string, certBlob string) listResponseElement {
+	var element listResponseElement
+	element.Environment = environment
+	element.Reason = reason
+	element.CertBlob = certBlob
+	return element
+}
+
 func (h *certRequestHandler) listPendingRequests(rw http.ResponseWriter, req *http.Request) {
-	_, environment, err := h.formBoilerplate(req)
+	var certRequestID string
+
+	err := req.ParseForm()
 	if err != nil {
 		http.Error(rw, fmt.Sprintf("%v", err), http.StatusBadRequest)
 		return
 	}
 
-	var certRequestID string
 	certRequestIDs, ok := req.Form["certRequestId"]
 	if ok {
 		certRequestID = certRequestIDs[0]
 	}
 
 	foundSomething := false
-	results := make(map[string]string)
+	results := make(map[string]listResponseElement)
 	for k, v := range h.state {
-		if v.environment == environment {
-			encodedCert := base64.StdEncoding.EncodeToString(v.request.Marshal())
-			// Two ways to use this URL. If caller specified a certRequestId
-			// then we return only that one. Otherwise everything.
-			if certRequestID == "" {
-				results[k] = encodedCert
+		encodedCert := base64.StdEncoding.EncodeToString(v.request.Marshal())
+		element := newResponseElement(v.environment, v.reason, encodedCert)
+		// Two ways to use this URL. If caller specified a certRequestId
+		// then we return only that one. Otherwise everything.
+		if certRequestID == "" {
+			results[k] = element
+			foundSomething = true
+		} else {
+			if certRequestID == k {
+				results[k] = element
 				foundSomething = true
-			} else {
-				if certRequestID == k {
-					results[k] = encodedCert
-					foundSomething = true
-					break
-				}
+				break
 			}
 		}
 	}

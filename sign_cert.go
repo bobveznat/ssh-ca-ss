@@ -18,7 +18,13 @@ import (
 	"time"
 )
 
-type certRequestResponse map[string]string
+type listResponseElement struct {
+	Environment string
+	Reason      string
+	CertBlob    string
+}
+
+type certRequestResponse map[string]listResponseElement
 
 func main() {
 	var environment, certRequestID string
@@ -94,7 +100,7 @@ func main() {
 		fmt.Println("Didn't get a valid response", err)
 		os.Exit(1)
 	}
-	getRespBuf := make([]byte, 4096)
+	getRespBuf := make([]byte, 8192)
 	bytesRead, _ := getResp.Body.Read(getRespBuf)
 	getResp.Body.Close()
 	if getResp.StatusCode != 200 {
@@ -107,13 +113,17 @@ func main() {
 		fmt.Println("Unable to unmarshall response", err)
 		os.Exit(1)
 	}
-	parseableCert := []byte("ssh-rsa-cert-v01@openssh.com " + getResponse[certRequestID])
+	fmt.Println("response:", getResponse)
+	parseableCert := []byte("ssh-rsa-cert-v01@openssh.com " + getResponse[certRequestID].CertBlob)
+	fmt.Println(string(parseableCert))
 	pubKey, _, _, _, err := ssh.ParseAuthorizedKey(parseableCert)
 	if err != nil {
 		fmt.Println("Trouble parsing response", err)
 		os.Exit(1)
 	}
 	cert := pubKey.(*ssh.Certificate)
+	fmt.Printf("This cert is for the %s environment\n", getResponse[certRequestID].Environment)
+	fmt.Println("Reason:", getResponse[certRequestID].Reason)
 	fmt.Println("Certificate data:")
 	fmt.Printf("  Serial: %v\n", cert.Serial)
 	fmt.Printf("  Key id: %v\n", cert.KeyId)
