@@ -10,6 +10,7 @@ import (
 	"github.com/bobveznat/ssh-ca-ss/ssh_ca"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -100,22 +101,23 @@ func main() {
 		fmt.Println("Didn't get a valid response", err)
 		os.Exit(1)
 	}
-	getRespBuf := make([]byte, 8192)
-	bytesRead, _ := getResp.Body.Read(getRespBuf)
+	getRespBuf, err := ioutil.ReadAll(getResp.Body)
+	if err != nil {
+		fmt.Println("Error reading response body", err)
+		os.Exit(1)
+	}
 	getResp.Body.Close()
 	if getResp.StatusCode != 200 {
 		fmt.Println("Error getting that request id:", string(getRespBuf))
 		os.Exit(1)
 	}
 	getResponse := make(certRequestResponse)
-	err = json.Unmarshal(getRespBuf[:bytesRead], &getResponse)
+	err = json.Unmarshal(getRespBuf, &getResponse)
 	if err != nil {
 		fmt.Println("Unable to unmarshall response", err)
 		os.Exit(1)
 	}
-	fmt.Println("response:", getResponse)
 	parseableCert := []byte("ssh-rsa-cert-v01@openssh.com " + getResponse[certRequestID].CertBlob)
-	fmt.Println(string(parseableCert))
 	pubKey, _, _, _, err := ssh.ParseAuthorizedKey(parseableCert)
 	if err != nil {
 		fmt.Println("Trouble parsing response", err)
