@@ -28,7 +28,7 @@ func main() {
 	configPath := home + "/.ssh_ca/requester_config.json"
 
 	validBeforeDur, _ = time.ParseDuration("2h")
-	validAfterDur, _ = time.ParseDuration("0")
+	validAfterDur, _ = time.ParseDuration("-2m")
 
 	flag.StringVar(&principalsStr, "principals", "ec2-user,ubuntu", "Valid usernames for login. Comma separated.")
 	flag.StringVar(&environment, "environment", "", "The environment you want (e.g. prod).")
