@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"time"
 )
 
@@ -178,6 +179,13 @@ func (h *certRequestHandler) listPendingRequests(rw http.ResponseWriter, req *ht
 	if ok {
 		certRequestID = certRequestIDs[0]
 	}
+
+	matched, _ := regexp.MatchString("^[A-Z2-7=]{24}$", certRequestID)
+	if certRequestID != "" && !matched {
+		http.Error(rw, "Invalid certRequestId", http.StatusBadRequest)
+		return
+	}
+	log.Printf("List pending requests received from %s for request id '%s'\n", req.RemoteAddr, certRequestID)
 
 	foundSomething := false
 	results := make(map[string]listResponseElement)
