@@ -17,6 +17,8 @@ import (
 	"time"
 )
 
+const buildVersion string = "dev"
+
 func main() {
 	var principalsStr, environment, reason string
 	var validBeforeDur, validAfterDur time.Duration
@@ -37,7 +39,13 @@ func main() {
 	flag.StringVar(&reason, "reason", "", "Reason for needing SSH certificate.")
 	flag.DurationVar(&validAfterDur, "valid-after", validAfterDur, "Relative time")
 	flag.DurationVar(&validBeforeDur, "valid-before", validBeforeDur, "Relative time")
+	print_version := flag.Bool("version", false, "Print the version and exit")
 	flag.Parse()
+
+	if *print_version {
+		fmt.Printf("sign_cert v.%s\n", buildVersion)
+		os.Exit(0)
+	}
 
 	config, err := ssh_ca.LoadRequesterConfig(configPath)
 	if err != nil {
@@ -159,8 +167,8 @@ func main() {
 		fmt.Println("Error sending request to signer daemon:", err)
 		os.Exit(1)
 	}
-	defer resp.Body.Close()
 	respBuf, err := ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
 	if err != nil {
 		fmt.Println("Error retrieving response to our request. Try again?", err)
 		os.Exit(1)

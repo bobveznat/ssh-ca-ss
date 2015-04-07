@@ -19,6 +19,8 @@ import (
 	"time"
 )
 
+const buildVersion string = "dev"
+
 type listResponseElement struct {
 	Environment string
 	Reason      string
@@ -39,7 +41,13 @@ func main() {
 	flag.StringVar(&environment, "environment", "", "The environment you want (e.g. prod).")
 	flag.StringVar(&configPath, "configPath", configPath, "Path to config json.")
 	flag.StringVar(&certRequestID, "cert-request-id", certRequestID, "ID of cert request.")
+	print_version := flag.Bool("version", false, "Print the version and exit")
 	flag.Parse()
+
+	if *print_version {
+		fmt.Printf("sign_cert v.%s\n", buildVersion)
+		os.Exit(0)
+	}
 
 	allConfig, err := ssh_ca.LoadSignerConfig(configPath)
 	if err != nil {
