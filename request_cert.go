@@ -39,10 +39,10 @@ func main() {
 	flag.StringVar(&reason, "reason", "", "Reason for needing SSH certificate.")
 	flag.DurationVar(&validAfterDur, "valid-after", validAfterDur, "Relative time")
 	flag.DurationVar(&validBeforeDur, "valid-before", validBeforeDur, "Relative time")
-	print_version := flag.Bool("version", false, "Print the version and exit")
+	printVersion := flag.Bool("version", false, "Print the version and exit")
 	flag.Parse()
 
-	if *print_version {
+	if *printVersion {
 		fmt.Printf("sign_cert v.%s\n", buildVersion)
 		os.Exit(0)
 	}

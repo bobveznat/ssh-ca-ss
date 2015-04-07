@@ -41,10 +41,10 @@ func main() {
 	flag.StringVar(&environment, "environment", "", "The environment you want (e.g. prod).")
 	flag.StringVar(&configPath, "configPath", configPath, "Path to config json.")
 	flag.StringVar(&certRequestID, "cert-request-id", certRequestID, "ID of cert request.")
-	print_version := flag.Bool("version", false, "Print the version and exit")
+	printVersion := flag.Bool("version", false, "Print the version and exit")
 	flag.Parse()
 
-	if *print_version {
+	if *printVersion {
 		fmt.Printf("sign_cert v.%s\n", buildVersion)
 		os.Exit(0)
 	}
@@ -181,8 +181,7 @@ func main() {
 	} else {
 		fmt.Println("Cert signature not accepted.")
 		fmt.Println("HTTP status", resp.Status)
-		respBuf := make([]byte, 1024)
-		resp.Body.Read(respBuf)
+		respBuf, _ := ioutil.ReadAll(resp.Body)
 		fmt.Println(string(respBuf))
 		os.Exit(1)
 	}

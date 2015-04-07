@@ -28,10 +28,10 @@ func main() {
 	configPath := home + "/.ssh_ca/requester_config.json"
 
 	flag.StringVar(&environment, "environment", "", "The environment you want (e.g. prod).")
-	print_version := flag.Bool("version", false, "Print the version and exit")
+	printVersion := flag.Bool("version", false, "Print the version and exit")
 	flag.Parse()
 
-	if *print_version {
+	if *printVersion {
 		fmt.Printf("sign_cert v.%s\n", buildVersion)
 		os.Exit(0)
 	}
